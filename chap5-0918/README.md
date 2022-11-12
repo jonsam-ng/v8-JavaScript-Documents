@@ -216,7 +216,10 @@ const AstRawString* Scanner::CurrentSymbol(
 
 **（3）：** 是kNormalFunction，去获取函数的名字。  
 ## 3.2 延迟分析
-什么是延迟分析，延迟分析是V8中一种性能优化技术，即非立即执行的代码先不分析，执行时再做分析。众所周知，一个程序中，代码执行是有先后顺序的，也并不是所有代码都会执行，基于这一点，V8内部实现了延迟分析、延迟编译技术，达到提高效率的目的。下面讲解样例代码为什么会触发延迟分析。
+什么是延迟分析，延迟分析是V8中一种性能优化技术，即**非立即执行的代码先不分析**，执行时再做分析。众所周知，一个程序中，代码执行是有先后顺序的，也并不是所有代码都会执行，基于这一点，V8内部实现了延迟分析、延迟编译技术，达到提高效率的目的。下面讲解样例代码为什么会触发延迟分析。
+```ad-note
+参见[Blazingly fast parsing, part 2: lazy parsing · V8](https://v8.dev/blog/preparser)
+```
 JsPrint是一个常规(kNormalFunction)方法，取得函数名之后，开始分析函数内容，代码如下：  
 ```c++
 FunctionLiteral* Parser::ParseFunctionLiteral(

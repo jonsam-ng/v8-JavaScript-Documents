@@ -242,6 +242,9 @@ class FunctionLiteral final : public Expression {
   ```    
   Abstract Syntax Tree抽象语法树（AST）是精简版的解析树(parse tree)，在编译过程中，解析树是包含javascript源码所有语法信息的树型表示结构，它是代码在编译阶段的等价表示。抽象语法树概念是相对于解析树而言，对解析树进行裁剪，去掉一些语法信息和一些不重要的细节，所以叫抽象语法树。  
   V8编译的第一个阶段是扫描(scanner)js源代码文本，把文本拆成一些单词,再传入分词器，经过一系列的类型识别，根据词的类型识别单词的含义，进而产生token序列，单词识别过程有一个预先定义好的识别器类型模板，如图4。    
+```ad-note
+Parse Tree 即为 CST，CST 过于繁琐，所以不会直接使用。AST 和 CST 的内容等价。Scanner 扫描 Source，将源代码生成 tokens，随后经过语法分析、词法分析、语义分析生成 AST，这部分工作是在 Parser 中完成的。AST 是 V8 的中间产物之一，但是不是最核心的。
+```
   ![avatar](Figure%204.png)  
   图4中只截取了部分，读者可根据文件名自行查阅。  
   # 4 代码执行  

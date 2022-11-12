@@ -16,6 +16,12 @@ console.log(JsPrint(6));
 ```
 # 词法分析概述
 谈及词法分析时，有三个重要的术语需要知道，词法单元（token）、模式描述（pattern）、词素（lexeme）。词法分析的工作流程是先找到一个词法单元，再找这个词法单元的所有的可选属性--模式描述和词素的组合，循环往复去找下一个词法单元，详细说明见上一篇文章。
+```ad-note
+词素是语法学中的一个概念，**词素(Morpheme)是最小的语法单位，也是最小的语义单位。**参见[零起点语法第1课：词素 - 知乎](https://zhuanlan.zhihu.com/p/46647528)。
+关于Tokens, Patterns, Lexemes，参见：
+- [https://www.univ-orleans.fr/lifo/Members/Mirian.Halfeld/Cours/TLComp/l3-0708-LexA.pdf](https://www.univ-orleans.fr/lifo/Members/Mirian.Halfeld/Cours/TLComp/l3-0708-LexA.pdf)
+- [Lexical analysis](http://www.cs.ecu.edu/karl/5220/spr16/Notes/Review/lexer.html)
+```
 # 1.扫描词法单元`function`和`JsPrint`
 V8_INLINE Token::Value Scanner::ScanSingleToken()，这个方法是扫描token字的入口。`c0_`在初始化阶段已经指向了源代码的第一个字符(初始化流程，见上篇文章)，在本文的样例代码中，它代表“f”。
 ```c++
@@ -331,7 +337,7 @@ typename ParserBase<Impl>::IdentifierT ParserBase<Impl>::ParseIdentifier(
   return impl()->GetIdentifier();
 }
 ```
-在ParserBase<Impl>::ParseHoistableDeclaration()中，会调用上面的这个方法，在目前，`ParseIdentifier`方法是对`function`和`JsPrint`的分析，它又会引导我们进入下面的符号表(symbol)方法。  
+在ParserBase\<Impl\>::ParseHoistableDeclaration()中，会调用上面的这个方法，在目前，`ParseIdentifier`方法是对`function`和`JsPrint`的分析，它又会引导我们进入下面的符号表(symbol)方法。  
 ```c++
   V8_INLINE const AstRawString* GetSymbol() const {
     const AstRawString* result = scanner()->CurrentSymbol(ast_value_factory());
@@ -345,3 +351,6 @@ typename ParserBase<Impl>::IdentifierT ParserBase<Impl>::ParseIdentifier(
 正是因为有符号表的存在，我们在调试程序时才能够看到源代码，它是编译阶段生成的数据结构，准确地说符号表在词法分析阶段生成，在语法分析阶段完善和补充。  
 好了，今天到这里，下次见。  
 **微信：qq9123013  备注：v8交流学习    邮箱：v8blink@outlook.com**
+```ad-note
+c++的代码比较晦涩难懂，通过[acornjs/acorn: A small, fast, JavaScript-based JavaScript parser](https://github.com/acornjs/acorn)可以弥补这块的内容。
+```

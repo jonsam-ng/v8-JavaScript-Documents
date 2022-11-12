@@ -2,10 +2,15 @@
 
 ![avatar](../v8.png)
 # 1.摘要  
-本次是第六篇，讲解V8中抽象语法树(abstract syntax code,AST)到字节码(bytecode)的翻译过程。AST是源代码的抽象语法结构的树状表示，是语法分析的输出结果，bytecode是一种体系结构无关的、在V8中可以运行的抽象机器码，不依赖指令集。本文中，我们以AST作为V8输入，从AST生成后开始调试(Debug)，讲解bytecode生成过程，分析核心源码和重要数据结构，如图1所示。本文内容的组织方式：介绍字节码，讲解字节码原理，如何看懂字节码(章节2)；AST到bytecode的翻译过程、源码分析(章节3)。  
+本次是第六篇，讲解V8中抽象语法树(abstract syntax code,AST)到字节码(bytecode)的翻译过程。AST是源代码的抽象语法结构的树状表示，是语法分析的输出结果，bytecode是一种体系结构无关的、在V8中可以运行的**抽象**机器码，不依赖指令集。本文中，我们以AST作为V8输入，从AST生成后开始调试(Debug)，讲解bytecode生成过程，分析核心源码和重要数据结构，如图1所示。本文内容的组织方式：介绍字节码，讲解字节码原理，如何看懂字节码(章节2)；AST到bytecode的翻译过程、源码分析(章节3)。  
+```ad-note
+注意，bytecode 不是机器码，bytecode 是机器无关的，因此这里说”抽象机器码“只是一种类比，不是机器码。参考[Difference between Byte Code and Machine Code - GeeksforGeeks](https://www.geeksforgeeks.org/difference-between-byte-code-and-machine-code/)
+
+很多VM编译器都会有字节码，只是不同的编译器所使用的字节码集合不同。
+```
 ![avatar](f1.png)
 # 2.字节码介绍
-字节码是机器码的抽象表示，采用和物理CPU相同的计算模型进行设计。字节码是最小功能完备集，JavaScript源码的任何功能都可以等价转换成字节码的组合。V8有数以百计的字节码，例如`Add`和`Sub`等简单操作，还有`LdaNamedProperty`等属性加载操作。每个字节码都可以指定寄存器作为其操作数，生成字节码的过程中使用寄存器 r0，r1，r2，... 和累加寄存器（accumulator register）。累加器是和其它寄存器一样的常规寄存器，但不同的是累加器的操作没有显式给出指令，具体来说，`Add r1`将寄存器`r1`中的值和累加器中的值进行加法运算，在这个过程不需要显示指出累加器。字节码的定义在v8/src/interpreter/bytecodes.h中，下面展示一部分相关源码。  
+**字节码是机器码的抽象表示**，采用和物理CPU相同的计算模型进行设计。字节码是**最小功能完备集**，JavaScript源码的任何功能都可以等价转换成字节码的组合。V8有数以百计的字节码，例如`Add`和`Sub`等简单操作，还有`LdaNamedProperty`等属性加载操作。每个字节码都可以指定寄存器作为其操作数，生成字节码的过程中使用寄存器 r0，r1，r2，... 和**累加寄存器**（accumulator register）。累加器是和其它寄存器一样的常规寄存器，但不同的是累加器的操作没有显式给出指令，具体来说，`Add r1`将寄存器`r1`中的值和累加器中的值进行加法运算，在这个过程不需要显示指出累加器。字节码的定义在v8/src/interpreter/bytecodes.h中，下面展示一部分相关源码。  
 ```c++
 #define BYTECODE_LIST_WITH_UNIQUE_HANDLERS(V)                                  \
   /* Extended width operands */                                                \
@@ -66,14 +71,17 @@
     OperandType::kFlag8)                                                       \
 //.........省略很多.....
 ```
-上面这段代码是字节码的宏定义，用语句`V(Ldar, ImplicitRegisterUse::kWriteAccumulator, OperandType::kReg)`举例说明，`Ldar`是加载数据到累加器，`ImplicitRegisterUse::kWriteAccumulator, OperandType::kReg`说明了`Ldar`指令的源操作数和目的操作数，具体讲两条字节码的含义，如下：  
+上面这段代码是字节码的宏定义，用语句`V(Ldar, ImplicitRegisterUse::kWriteAccumulator, OperandType::kReg)`举例说明，**`Ldar`是加载数据到累加器**（load accumulator register），`ImplicitRegisterUse::kWriteAccumulator, OperandType::kReg`说明了`Ldar`指令的源操作数和目的操作数，具体讲两条字节码的含义，如下：  
 **（1）** LdaSmi [1]，这里的[1]是Smi小整型(small int)常量，加载到累加器中，如图2所示。  
 ![avatar](f2.png)  
 **（2）** Star r1，这里的r1是r1寄存器，把累加器中的值写入到r1寄存器，目前累加器的值为1，执行完后r1的值为1，如图3所示。  
 ![avatar](f3.png)  
 其它字节码指令参见V8的指令定义文件，这里不再赘述。V8为了提升性能，会把多次执行的字节码标记为热点代码，使用优化编译器(TurboFan)把热点代码翻译成机器相关的本地指令，达到提高运行效率的目的，如图4所示。  
 ![avatar](f4.png)  
-解释器将AST翻译成字节码比TurboFan用时更短，对于运行次数较少的代码非常合适，即不在运行次数较少的代码上付出更高的编译代价。TurboFan则是对常用代码（热点代码）进行本地化编译，生成体系结构相关的机器码，这需要更长的编译时间，换来的是更快的执行速度。  
+```ad-warning
+这里 Ignition 指向 TurboFan 似乎有些不妥，因此 bytecode is all source of truth，bytecode 是 TurboFan 的 input，bytecode 经过 TurboFan 的编译成为 Machine code，因此，应该是 bytecode 指向 TurboFan。机器码可能会遇到去优化的问题，因此会回归到字节码，采取更为常规的编译方法。
+```
+解释器将AST翻译成字节码比TurboFan用时更短，对于运行次数较少的代码非常合适，即不在运行次数较少的代码上付出更高的编译代价。**TurboFan则是对常用代码（热点代码）进行本地化编译，生成体系结构相关的机器码**，这需要**更长的编译时间，换来的是更快的执行速度**。  
 去优化，是将机器码转成字节码，为什么要这样做？原因有很多，详细原因参见TurboFan的定义文件。这里说一个与技术开发人员相关的原因：调试javascript源码，对源码进行调试时，需要转回字节码。  
 # 3.字节码生成
 聊字节码生成之前，先要看明白AST树的结构，明白了AST树结构，也就知道了字节码生成其实是遍历树的过程，落地到程序上就是一个有限状态自动机，具体实现就是`switch case`配合一些预设的宏定义模板，图5给出了AST的数据结构。  
@@ -155,7 +163,7 @@ void BytecodeGenerator::GenerateBytecodeBody() {
 }
 ```  
 上面的函数是生成bytecode的入口，最终进入`VisitStatements(literal->body());`，从这里开始生成bytecode，在生成byteocde之前要先使用`AstNode->XXXtype()`获取子类的具体类型，下面给出`XXXtype`的具体实现。
-```C++
+```c++
 #define DECLARATION_NODE_LIST(V) \
   V(VariableDeclaration)         \
   V(FunctionDeclaration)

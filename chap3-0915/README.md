@@ -5,8 +5,33 @@
 # 本篇内容
 本次是第三篇，讲解V8中词法分析（scanner）的实现，这中间涉及到几个重要的数据结构和一些相关的编译知识，本文也尽量全面讲解相关的编译知识，争取让读者有一个全面的认识。**注：本文不涉及V8的优化编译**
 # 1.V8编译流程
-总体来说，V8的编译过程是同步实现的，主体流程是扫描在初始化时先生成一个token字，并放入缓存（cache），然后开始分析（parser），从缓存中取一个token做分析，然后生成抽象语法树的一个节点，再取下一个token进行分析，如此循环。如果缓存未命中(cache miss),便启动扫描去生成token，如图1所示。  
+总体来说，**V8的编译过程是同步实现的**，主体流程是扫描在初始化时先生成一个token字，并放入缓存（cache），然后开始分析（parser），从缓存中取一个token做分析，然后生成抽象语法树的一个节点，再取下一个token进行分析，如此循环。如果缓存未命中(cache miss),便启动扫描去生成token，如图1所示。  
 ![avatar](f1.png)  
+```ad-note
+title: Comparison Table Between Utf-8 and Utf-16:
+
+| **Parameters of Comparison** | **Utf-8** | **Utf-16** |
+| ------------------------------------------------------------------------------------------------------ | --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| **File Size** | It is **smaller** in size. | It is larger in size in comparison. |
+| **[ASCII](https://askanydifference.com/difference-between-ascii-and-ebcdic/ "ASCII") Compatibility** | It is compatible with **ASCII**. | It is not compatible with[ASCII](https://askanydifference.com/difference-between-unicode-and-ascii/ "ASCII"). |
+| **Byte Orientation** | It is **byte-oriented**. | It is not byte-oriented. |
+| **Error Recovery** | It is good in recovering from the errors made. | It is not as good as in recovering from the errors made. |
+| **Number of bytes** | In minimum case, it can only use up to 1 byte (8 bits). | In minimum case, it can use up to 2 bytes (16 bits).|
+| **Number of blocks** | It adopts 1-4 blocks. | It has adopted 1-2 blocks. |
+| **Efficiency** | More **efficient** | Less efficient |
+| **Popularity** | It is more **popular** on the web. | Doesn’t get much popularity. |
+
+参考：[Difference Between UTF-8 and UTF-16](https://askanydifference.com/difference-between-utf-8-and-utf-16/)
+
+从上表来看，UTF-8似乎比UTF-16更好，那么v8为什么使用 UTF-16呢，这有可能是因为兼容性的需求：Windows 和 Java 的某些历史包袱，参见[What are reasons to use UTF-16 instead of UTF-8 in some situations? - Quora](https://www.quora.com/What-are-reasons-to-use-UTF-16-instead-of-UTF-8-in-some-situations)，不要认为 V8 不需要兼容 Java，V8 在 Android 中的部分工作是由 Java 来承接的。
+
+> we chose UTF16 since that’s the encoding of JavaScript strings, and source positions need to be provided relative to that encoding.
+> 我们选择了UTF-16，因为那是JavaScript字符串的编码，而且需要提供相对于该编码的源位置。
+```
+```ad-note
+这是一个典型的生产者消费者模型，tokens 即为产品。JavaScript Sourcecode 是通过 Stream Reader 读入的（流式的好处是可以流式请求脚本、清理、读入），其格式被统一化为 UTF16。
+Cache 的内部结构大概是一个队列（任务池），Scanner 负责对 source string 进行扫描和 chunk，并且作为生产者将生成的 tokens 加入到 Cache；Parser 作为消费者将 Cache 中的 Tokens 加以分析，增量的构成 CST。由此看来，Scanner 和 Parser 是可以同时工作的，但是这里显然 V8 只为 Scanner 和 Parser 分配了一个线程。因此两者归根结底还是同步工作的，只是利用分时而已。这里生成 AST，是为了后面的 Ignition 的工作做准备工作。实际上，在 Parser 的前端应该是有一个 preparser 的，这里应该是省略了。
+```
 下面看一下V8中的代码实现，Parser::ParseProgram方法，是图1中扫描器(scanner)的入口点。在这段代码中可以看到scanner_.Initialize()和FunctionLiteral* result = DoParseProgram(isolate, info)，这两个方法的作用是：  
 **1.初始化扫描器(scanner)：** 生成第一个token字，scanner.c0_指向第一个开始的字符，也就是要扫描的第一个字符。  
 **2.DoParseProgram(isolate, info)：** 读取token字，生成AST的body，最终所有body汇聚成AST语法树。  
@@ -57,6 +82,9 @@ void Parser::ParseProgram(Isolate* isolate, Handle<Script> script,
         FunctionEvent(event_name, flags().script_id(), ms, start, end, "", 0));
   }
 }
+```
+```ad-note
+可以看出 Scanner 是嵌在 Parser 中。注意，这里只是入口，即 DoParseProgram。
 ```
 上述这段代码（Parser::ParseProgram）是分析V8中编译代码的最近入口点，从此处进入跟踪，可以看到编译的全流程。这个方法的外层也有很多调用者（caller）,但这些调用者的任务仅仅是做准备工作，这个方法开始进入了真正的编译，尤其要注意，在scanner的初始化阶段（scanner_.Initialize）就已经开始做了第一次扫描。  
 # 2.V8词法分析(scanner)工作流程 
@@ -152,6 +180,12 @@ class Utf16CharacterStream {
     return true;
   }
 ```
+```ad-note
+buffer 就是缓存队列。更多参考：[Blazingly fast parsing, part 1: optimizing the scanner · V8](https://v8.dev/blog/scanner)
+```
+```ad-help
+从功能来看，buffer 应该是一个循环队列，但是这里似乎找不到相关的佐证？具体的 Scanner 算法具体从代码分析。
+```
 代码的buffer_start_ = &buffer_[0]，这一句是用buffer_start_指向待编译源码的第一个字符。图3给出的是Utf16CharacterStream类中重要的函数。这个函数是读取一个块代码(code unit)，是后续生成token时的输入字符串。  
 ![avatar](f3.png)  
 前面提到的scanner.c0_这个成员，始终是指向即将开始token生成的字符串，下面的代码也说明了c0_的作用。
@@ -227,7 +261,10 @@ void Scanner::Scan(TokenDesc* next_desc) {
 编译技术是一个庞大的知识领域，涉及很多方面的理论知识，一个编译器的具体实现主要包括：词法分析、语义分析、中间代码、机器无关代码，机器码等多个阶段，此外，还有各种优化技术，例如：控制流优化、数据流优化、寄存器优化等等，这些优化技术与这些阶段交错执行，最终生成目标程序。从编译技术的角度看，V8的编译的每段代码都有相对应的理论支撑，看懂了这些理论，再来看V8编译源码，会很容易的。我们来看一下V8词法分析的知识点。
 词法分析是编译的第一个阶段。词法分析器的主要任务是读入源程序的输入字符、将它他们组成词素（lexeme），生成并输出一个词法单元（token），每个词法单元对应一个词素，这个词法单元被输出到语法分析器进行语法分析。当词法分析器发现一个标识符时，还会利用符号表进行保存。词法分析的工作流程、与符号表的交互过程都是由语法分析器驱动，如图4。  
 ![avatar](f4.png)  
-图4中，getNextToken是驱动词法分析器工作,向其索取token的命令,直到它识别出下一个词素为止，然后将生成的token返回给语法分析器。看一下V8的这个过程的实现方法。  
+图4中，**getNextToken是驱动词法分析器工作**,向其索取token的命令,直到它识别出下一个词素为止，然后将生成的token返回给语法分析器。看一下V8的这个过程的实现方法。  
+```ad-note
+Scanner 是由 Parser 驱动的。
+```
 ```C++
 void ParserBase<Impl>::ParseStatementList(StatementListT* body,
                                           Token::Value end_token) {
@@ -265,7 +302,7 @@ void ParserBase<Impl>::ParseStatementList(StatementListT* body,
   }
 }
 ```
-这段代码很长，而且我们在调式过程中，由于选取的调试用例不同，不一定能覆盖到每一条语句。我们只看最后的一部分,我的调试代码触发了最后这个while()的执行，其中最重要是 ParseStatementListItem()，图5给出了Parse驱动SCanner的调用堆栈，堆栈中的函数调用流程，也就是图4中的getNextToken的具体实现。  
+这段代码很长，而且我们在调式过程中，由于选取的调试用例不同，不一定能覆盖到每一条语句。我们只看最后的一部分,我的调试代码触发了最后这个while()的执行，其中最重要是 ParseStatementListItem()，图5给出了Parse驱动Scanner的调用堆栈，堆栈中的函数调用流程，也就是图4中的getNextToken的具体实现。  
 ![avatar](f5.png)  
 在图5中还能看到前面(图1)提到的缓存(cache)，它在v8中的实现是Consum方法。下面给出V8中Token生成的详细实现。
 ```c++
@@ -351,5 +388,8 @@ V8_INLINE Token::Value Scanner::ScanSingleToken() {
 }
 ```
 从代码中可以看出，生成token的过程就是这个switch case，它是一个自动机，token生成的过程也大量用到了正则表达。总结一句：token的生成过程就是字符匹配的过程，在V8中预先定义了token模板（TOKEN_LIST），再利用switch case完成字符匹配，生成token。
-好了，今天到这里，下次见。  
+好了，今天到这里，下次见。
 **微信：qq9123013  备注：v8交流学习    邮箱：v8blink@outlook.com**
+```ad-help
+这部分内容需要结合代码具体分析。
+```
