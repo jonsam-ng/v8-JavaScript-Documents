@@ -67,7 +67,11 @@ Chrome的重要地位不用赘述，V8不仅是chrome的核心组件，还是nod
 &emsp;&emsp;注意图中文件的位置，和断点，调试时就可以在这个位置停下来,这就是跟踪方法，单步进入分析即可。  
 # 四、元素(ELement)原理及重要数据结构  
 ## 1.主要代码和数据结构   
-&emsp;&emsp;Element中的大量方法，例如pop或者slice方法等，大多都是用来对一段连续的地址空间进行操作的。ElementsAccessor是操作Element的基类，在Element上的每个操作都会对应到ElmentsAccessor。
+&emsp;&emsp;Element中的大量方法，例如pop或者slice方法等，大多都是用来对一段连续的地址空间进行操作的。<mark style="background: #FFF3A3A6;">ElementsAccessor是操作Element的基类</mark>，在Element上的每个操作都会对应到ElmentsAccessor。
+``` ad-note
+Object 内部包含描述对象 shape 的 layout map，同时 non-number key 属性作为 properties，以非连续空间存储；number key 属性则作为 elements，以连续空间存储。
+Array 的结构为 Fixed Array，继承自 Object，同时新增 Length 属性。
+```
 ```
 void ElementsAccessor::InitializeOncePerProcess() {
   static ElementsAccessor* accessor_array[] = {

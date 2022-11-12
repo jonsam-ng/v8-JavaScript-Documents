@@ -3,6 +3,9 @@
 
 # 本篇内容
 本次是第二篇，主要内容是从宏观上概述V8的运行过程，包括：初始化、编译代码、运行、退出。面对V8这个庞大的系统工程，本文尽力为读者构建一个全面的大局观，从程序源码的角度揭示V8代码的主要脉络，达到快速入手的目的。本文想给读者的“大局观”是：知道V8是怎么运行的，了解V8运行过程中的几个重要中间阶段、重要中间结果、以及相应的重要数据结构。为此，本文从Javascript代码的两个主要阶段编译和执行的知识点出发，以V8源码中的重要数据结构抽象语法树(AST)和字节表(Bytecode)为抓手展开全面、宏观的讲解。
+``` ad-note
+AST 和 Bytecode 是 V8 中重要的中间产物，其中 AST 和 Parser 生成的中间产物，而 Bytecode 是 Ignition 生成的中间产物。从 AST 和 Native Code 的跳跃虽然带来了性能红利，但是对于 Feature 的扩展和 performance optimizing 来说，是不够方便的。
+```
 # 1 V8运行过程
 以v8\samples\hello-world.c为例，这个例子我曾反复说过，它是运行V8功能的最小代码集合，只包含了V8的最重要最基本的功能，适合入门。例如，徒增学习难度的优化编译功能，在这个例子中就没出现，优化编译是V8最重要的部分，是提升性能的关键，但对初学者并没有用，所以说只有基础功能的hello-world最适合入门。  
 ```C++
@@ -46,6 +49,9 @@ int main(int argc, char* argv[]) {
 //省略部分代码
 //...
 ```  
+```ad-note
+由上我们看到了isolate、scope、context、source、script 的创建过程。isolate是JavaScript运行的沙箱容器，这种容器应该提供了JavaScript运行的隔离能力。Context 是JavaScript运行的上下文环境，程序不能脱离上下文环境而运行，Context 中应该提供了 DOM 和 BOM 的能力。Context依附于 isolate，一个 Isolate 可以由多个 Context，但是 Context 必须依存与一个 Isolate。source 是程序的源代码。script 是 source 和 Context 结合的产物，也就是只有具有 Context 的 Source 才可以作为可运行的 Script。Script 提供 Compile 方法（静态方法）和Run方法（实例方法），分别提供编译源代码和执行源代码的功能。注意，这里体现的是 Compile 和 Run 的串行的执行，从整个JavaScript的生命周期来看，Compile 和 Run 是可以并行运行的。编译代码和执行代码实际上运行于两个不同的线程，这也是提升V8速度的必然要求。
+```
 上面这段代码是hello-world.cc中最重要的部分，V8的初始化是v8::V8::Initialize()，Isolate的创建v8::Isolate::New，编译v8::Script::Compile，执行script->Run。handle和context没有提及，因为对初学者不重要。图1说明了每个阶段的重要数据结构，读者可以利用VS2019的debug跟踪查看详细过程（跟踪方法见上一篇文章）。  
 ![avatar](Figure%201.png)  
 图1中可以看到hello-world.cc程序的主要主体结构（工作流程），还有与之对应的方法和数据结构。V8代码量很大，通过重要数据结构和中间结果入手学习，可以很好地抓住V8的主线功能，把主线功能理解透彻之后，再学习旁支功能可达到事半功倍的效果。接下来，以图1中主要方法为主，结合主要数据结构进行单独讲解。   
@@ -70,7 +76,11 @@ VirtualMemory reservation(params.page_allocator,
                           params.reservation_size,
                           reinterpret_cast<void*>(address));
 ```
-申请内存时为了保证内存对齐，它的做法是先申请两倍的内存,然后从中找一个适合做内存对齐的地址，再把两倍内存释放，从刚找到的地址申请需要的4G大小。具体做法是：padded_reservation申请一个两倍大小的内存（8G）,再利用padded_reservation.Free()释放，再用reservation申请的4G内存则是V8真正的内存。下面讲解V8管理内存的主要数据结构：VirtualMemoryCage。V8向操作系统申请4G内存，用于后续的所有工作，例如创新Isolate，等等。V8的内存方式采用的段页式，和操作系统（OS）的方法类似，但不像OS有多个段，V8只有一个段，但有很多页。VirtualMemeoryCage的定义在allocation.h中，我们对它的结构进行说明。  
+```ad-tip 
+title:无对齐内存
+无对齐内存访问是指从一个不被N字节数平均分割的地址访问大小为N字节的数据。参见[Aligned and Unaligned Memory Access - Open4Tech](https://open4tech.com/aligned-and-unaligned-memory-access/)
+```
+申请内存时为了保证内存对齐，它的做法是先申请两倍的内存,然后从中找一个适合做内存对齐的地址，再把两倍内存释放，从刚找到的地址申请需要的4G大小。具体做法是：padded_reservation申请一个两倍大小的内存（8G）,再利用padded_reservation.Free()释放，再用reservation申请的4G内存则是V8真正的内存。下面讲解V8管理内存的主要数据结构：VirtualMemoryCage。V8向操作系统申请4G内存，用于后续的所有工作，例如创建Isolate，等等。V8的内存方式采用的段页式，和操作系统（OS）的方法类似，但不像OS有多个段，V8只有一个段，但有很多页。VirtualMemeoryCage的定义在allocation.h中，我们对它的结构进行说明。  
 ```
 // +------------+-----------+-----------  ~~~  -+
 // |     ...    |    ...    |   ...             |
@@ -85,7 +95,7 @@ VirtualMemory reservation(params.page_allocator,
 ```
 "a VirtualMemory reservation"是V8源码中的叫法，reservation size是4G，也就是v8申请内存的总大小，start是这个内存的基址，cage base是v8用于管理的基址，可以先理解为cage base是页表位置，allocatable开始是v8可以分配的，用于创新isolate。VirtualMemoryCage中的成员reservation_负责指向这个4G内存。另一个重要的结构是ReservationParams,申请内存大小(4G),对齐方式，指针压缩等参数都在这个结构中定义。 
 # 3 Isolate
-Isolate是一个完整的V8实例，有着完整的堆栈和Heap。V8是虚拟机，isolate才是运行javascript的宿主。一个Isolate是一个独立的运行环境, 包括但不限于堆管理器(heap)、垃圾回收器（gc）等。在一个时间，有且只有一个线程能在isolate中运行代码，也就是说同一时刻，只有一个线程能进入isolate,多个线程可以通过切换来共享同一个isolate。  
+<mark style="background: #FFF3A3A6;">Isolate是一个完整的V8实例，有着完整的堆栈和Heap</mark>。V8是虚拟机，**isolate才是运行javascript的宿主**。一个Isolate是一个独立的运行环境, 包括但不限于堆管理器(heap)、垃圾回收器（gc）等。**在一个时间，有且只有一个线程能在isolate中运行代码**，也就是说**同一时刻，只有一个线程能进入isolate,多个线程可以通过切换来共享同一个isolate**。  
 ```C++
 /**
  * Isolate represents an isolated instance of the V8 engine.  V8 isolates have
@@ -129,7 +139,10 @@ class V8_EXPORT Isolate {
 //省略多行
 //.....
 ```
-上面这段代码是isolate对外(export)提供的接口，方便其它程序的使用。 这个isolate可以理解为javascript的运行单元，多个线程也就是多个任务可以共享一个运行单元，这种共享类似操作系统中的调度机制，涉及到几个重要的概念：任务切换（亦称任务调度）、中断、上下文(context)的切换方法，由此我们引出V8中几个重要的概念。  
+```ad-note
+Isolate 中有同步的问题，即**某一时刻**，一个 Isolate 只能为一个 Thread 提供宿主环境。每一个浏览器的 Tab 页创建唯一的 Isolate，其中每个 Isolate 中的变量、函数、环境（Heap、Stack）等实现隔离。不同的 Isolate 中的 Thread 可以并行运行。
+```
+上面这段代码是isolate对外(export)提供的接口，方便其它程序的使用。 这个isolate可以理解为javascript的运行单元，多个线程也就是多个任务可以共享一个运行单元，这种共享类似操作系统中的调度机制，涉及到几个重要的概念：**任务切换（亦称任务调度）、中断、上下文(context)的切换方法**，由此我们引出V8中几个重要的概念。  
 **a**.Context：上下文，所有的JS代码都是在某个V8 Context中运行的。
 **b**.Handle，一个指定JS对象的索引，它指向此JS对象在V8堆中的位置。
 **c**.Handle Scope，包含很多handle的集合，用于对多个handle进行统一管理,当Scope被移出堆时，它所管理的handle集合也就被释放了。  
