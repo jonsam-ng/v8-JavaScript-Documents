@@ -6,7 +6,7 @@
 **关键字** bytecode handler（字节码处理程序），dispatch，Builtin,Ignition  
 
 # 2 Builtin
-学习Ignition，绕不开Builtin，因为Ignition的大部分功能由Builtin实现。Builtin（built in function）是V8的内建功能，它是V8运行时可执行的代码块，实现Builtin功能的方式主要有：Javascript、C++、汇编、CodeStubAssembler四种方式。其中，CodeStubAssembler是一种平台无关（platform-independent）的抽象语言，由TurbFan编译生成。Builtin有很多种，以TF_BUILTIN举例说明，下面是它的宏定义模板:
+学习Ignition，绕不开Builtin，因为Ignition的大部分功能由Builtin实现。**Builtin（built in function）是V8的内建功能**，它是**V8运行时可执行的代码块**，实现Builtin功能的方式主要有：Javascript、C++、汇编、CodeStubAssembler四种方式。其中，CodeStubAssembler是一种平台无关（platform-independent）的抽象语言，由TurbFan编译生成。Builtin有很多种，以TF_BUILTIN举例说明，下面是它的宏定义模板:
 ```C++
 #define TF_BUILTIN(Name, AssemblerBase)                                     \
   class Name##Assembler : public AssemblerBase {                            \
@@ -124,6 +124,11 @@ enum class Builtin : int32_t {
 根据数组成员中存储的内存地址，进行汇编级调试。此外，另一个跟踪方法是从`i::Excetuion::Call()`方法进行跟踪，最终也是进入汇编代码，不再赘述。开始跟踪之前，一定要先分析重要的数据结构，学习相关原理，例如V8的堆栈布局(stack layout)等，这会使调试Builtin事半功倍。V8是一个庞大的系统，涉及了编译技术、体系结构、操作系统等众多知识领域，有相应的知识储备可以使学习V8的过程更容易一些。
 # 3 Ignition解释器
 前面介绍了Ignition的调试方法，本节详细讲解Ignition源码的具体实现和工作流程，Ignition是V8解释器，负责执行字节码，它的输入一个字节码列表（bytecode array），输出是程序的执行结果。先给出几个重要约定：  
+```ad-note
+Ignition 除了执行 Bytecode 之外还要生成 Bytecode。此字节码列表即为 V8 内置的字节码表，参见[v8/bytecodes.h at master · v8/v8](https://github.com/v8/v8/blob/master/src/interpreter/bytecodes.h)。
+
+**Ignition is a register machine with an accumulator register.**参见[Understanding V8’s Bytecode. V8 is Google’s open source JavaScript… | by Franziska Hinkelmann | DailyJS | Medium](https://medium.com/dailyjs/understanding-v8s-bytecode-317d46c94775)
+```
 
 **（1）** bytecode handler，字节码处理程序，每个字节码对应一个处理程序，Ignition解释执行字节码的本质就是执行对应的处理程序。 
 
@@ -131,9 +136,15 @@ enum class Builtin : int32_t {
 
 **（3）** 每一条字节码执行完后，都要调用`Dispatch()`，这个函数负责跳转到下一条字节码开始执行。  
 
-**（4）** Ignition是一个基于寄存器的解释器，这些寄存器是V8维护的虚拟寄存器，用栈实现，不是物理寄存器。但有一个例外，Ignition有一个累加器寄存器，它被很多字节码作为隐式的输入输出寄存器，它是物理寄存器。  
+**（4）** Ignition是一个基于寄存器的解释器，这些寄存器是V8维护的**虚拟寄存器**，**用栈实现**，**不是物理寄存器**。但有一个例外，Ignition有一个**累加器寄存器**，它被很多字节码作为隐式的输入输出寄存器，它是物理寄存器。  
 
 **（5）** dispatch table,字节码分发表，每个isolate都包含一个全局的字节码分发表，分发表以字节码的枚举值作为索引，表项是字节码处理程序的对象指针。  
+
+```ad-note
+- [Dispatch Table](https://www.wikiwand.com/en/Dispatch_table) 应该是 Bytecode 和 Handler 的映射表。
+- Isolate 是 V8 的一个实例，因此具有单独的 Dispatch Table。
+```
+
 以上五点约定的功能均写入了`snapshot_blob.bin`文件，在V8启动时通过反序列化方式加载。  
 `InterpreterEntryTrampoline`的源码实现如下：  
 ```c++
@@ -185,7 +196,7 @@ void Builtins::Generate_InterpreterEntryTrampoline(MacroAssembler* masm) {
 
 }
 ```
-`InterpreterEntryTrampoline`的作用是构建调用堆栈，分配部局变量等，图2给出了一种`InterpreterEntryTrampoline`构建的栈布局，不同类型函数有不同的堆栈，第七篇文章中讲的堆栈也是由这个函数构建的。上述代码中`GetSharedFunctionInfoBytecodeOrBaseline`是取得bytecode array，通过每一个`Label`可以看出要执行的功能，`__`的具体实现是`#define __ ACCESS_MASM(masm)`，之后会调用bytecode array的第一条bytecode，开始执行。  
+`InterpreterEntryTrampoline`的作用是构建调用堆栈，分配部局变量等，图2给出了一种`InterpreterEntryTrampoline`构建的栈布局，不同类型函数有不同的堆栈，第七篇文章中讲的堆栈也是由这个函数构建的。上述代码中`GetSharedFunctionInfoBytecodeOrBaseline`是取得bytecode array，通过每一个`Label`可以看出要执行的功能，**`__`的具体实现是`#define __ ACCESS_MASM(masm)`**，之后会调用bytecode array的第一条bytecode，开始执行。  
 ![avatar](f2.png)  
 
 `Builtins`类中还定义了其它一些重要的函数，见下面源码：

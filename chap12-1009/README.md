@@ -2,10 +2,10 @@
 ![avatar](../v8.png)  
 
 # 1 摘要  
-编译Javascript源码得到的字节码流（Bytecode Array）不能直接执行，绑定了入口（Entry）和上下文（Context）的字节码流才能被解释器（Ignition）执行，绑定了“入口+上下文”的字码流称为JSFunction，JSFunction是Ignition可以执行的实例。读懂JSFunction，可以更加深入了解Igntion的工作原理，更有助于在脑海中、在演草纸上擘画出字节码的解释（interpreter）过程。本文以SharedFunction（字节码流的表示方法）为输入，讲解JSFuncition源码和重要功能函数，分析JSFunction创建（new）、绑定入口和上下文的过程（章节2）；最后，分析JSFunction内存布局，讲解读/写（getter/setter）方法（章节3）。
+编译Javascript源码得到的**字节码流**（Bytecode Array）不能直接执行，**绑定了入口（Entry）和上下文（Context）的字节码流才能被解释器（Ignition）执行**，**绑定了“入口+上下文”的字码流称为JSFunction**，**JSFunction是Ignition可以执行的实例**。读懂JSFunction，可以更加深入了解Igntion的工作原理，更有助于在脑海中、在演草纸上擘画出字节码的解释（interpreter）过程。本文以SharedFunction（字节码流的表示方法）为输入，讲解JSFuncition源码和重要功能函数，分析JSFunction创建（new）、绑定入口和上下文的过程（章节2）；最后，分析JSFunction内存布局，讲解读/写（getter/setter）方法（章节3）。
 
 # 2 JSFunction分析  
-一段C语言程序要经过编译（Compilation）、汇编（Assembly）和链接（Linking）之后才能执行。不太严谨但很形象的类比：字节码流类似汇编之后的结果（V8称之为SharedFunction），JSFunction类似链接之后的程序，所以说JSFunction是可以执行的实例。下面来看JSFunction源码：  
+一段C语言程序要经过编译（Compilation）、汇编（Assembly）和链接（Linking）之后才能执行。不太严谨但很形象的类比：字节码流类似汇编之后的结果（V8称之为SharedFunction），**JSFunction类似链接之后的程序**，所以说JSFunction是可以执行的实例。下面来看JSFunction源码：  
 ```c++
 1.  class JSFunction : public JSObject {
 2.    public:
@@ -100,7 +100,7 @@
 91.    OBJECT_CONSTRUCTORS(JSFunction, JSObject);
 92.  };
 ```  
-代码18~45行是关于优化及反优化的功能，这些优化机制用于热点统计，反馈给TurboFan用于优化编译；46~68行定义了`GETTER`方法。5~7行定义了几个重要的数据索引（index）；10，11，12行代码绑定上下文和全局Reciver；17行代码绑定入口的Builtin功能（InterpreterEntryTrampoline），87行是JSFunction的内存布局，下面跟随new JSFunction过程逐步分析:  
+代码18~45行是关于**优化及反优化的功能**，这些优化机制用于热点统计，反馈给TurboFan用于优化编译；46~68行定义了`GETTER`方法。5~7行定义了几个重要的数据索引（index）；10，11，12行代码绑定上下文和**全局Reciver**；17行代码绑定入口的Builtin功能（InterpreterEntryTrampoline），87行是JSFunction的内存布局，下面跟随new JSFunction过程逐步分析:  
 **（1）** 获得SharedFunction  
 ```c++
 1.  void InstallBytecodeArray(Handle<BytecodeArray> bytecode_array,
@@ -182,6 +182,9 @@
 21.    return function;
 22.  }
 ```
+```ad-note
+由 `initialize_properties`、`initialize_elements`和`InitializeJSObjectBody` 可见 JSFunction 是特殊的 JSObject。每个 JSFunction 具有 Shared Info、Code Object 和 Feedback Cell。
+```
 上述代码9行，把`SharedFunctionInfo`保存到`kSharedFunctionInfoOffset`位置。代码10行，`GetCode()`源码如下：  
 ```c++
 1.  Code SharedFunctionInfo::GetCode() const {
@@ -223,7 +226,7 @@
 ![avatar](f1.png)  
 # 3 JSFunction内存布局  
 
-下面讲解JSFuncion的内存布局，JSFunction是堆对象，它的成员都有固定的存储偏移（offset），`class JSFunction`中的`DEFINE_FIELD_OFFSET_CONSTANTS`宏模板定义了JSFuncion成员的封装方法，源码如下：    
+下面讲解JSFuncion的内存布局，JSFunction是**堆对象**，它的**成员都有固定的存储偏移（offset）**，`class JSFunction`中的`DEFINE_FIELD_OFFSET_CONSTANTS`宏模板定义了JSFuncion成员的封装方法，源码如下：    
 ```c++
 #define TORQUE_GENERATED_JSFUNCTION_FIELDS(V) \
 V(kStartOfStrongFieldsOffset, 0) \
@@ -245,7 +248,7 @@ V(kSize, 0) \
     LIST_MACRO(DEFINE_ONE_FIELD_OFFSET)                        \
   };
 ```  
-`TORQUE_GENERATED_JSFUNCTION_FIELDS`定义了所有成员的存储偏移，StartOffset是`kHeaderSize`，它是基址，通过基址+偏移的方法实现读/写成员，以JSFunction的set_code为例讲解，代码如下:  
+`TORQUE_GENERATED_JSFUNCTION_FIELDS`定义了所有成员的存储偏移，StartOffset是`kHeaderSize`，它是基址，**通过基址+偏移的方法实现读/写成员**，以JSFunction的set_code为例讲解，代码如下:  
 ```c++
 void JSFunction::set_code(Code value) {
   DCHECK(!ObjectInYoungGeneration(value));

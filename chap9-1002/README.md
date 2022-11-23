@@ -2,7 +2,7 @@
 
 ![avatar](../v8.png)
 # 1 摘要 
-上一篇文章中，Builtin作为先导知识，我们做了宏观概括和介绍。Builtin（Built-in function）是编译好的内置代码块（chunk），存储在`snapshot_blob.bin`文件中，V8启动时以反序列化方式加载，运行时可以直接调用。Builtins功能共计600多个，细分为多个子类型，涵盖了解释器、字节码、执行单元等多个V8核心功能，本文从微观角度剖析Builtins功能的源码，在不使用`snapshot_blob.bin`文件的情况下，详细说明Builtin创建和运行过程。
+上一篇文章中，Builtin作为先导知识，我们做了宏观概括和介绍。Builtin（Built-in function）是编译好的内置代码块（chunk），存储在`snapshot_blob.bin`文件中，V8启动时以反序列化方式加载，运行时可以直接调用。Builtins功能共计600多个，细分为多个子类型，**涵盖了解释器、字节码、执行单元等多个V8核心功能**，本文从微观角度剖析Builtins功能的源码，在不使用`snapshot_blob.bin`文件的情况下，详细说明Builtin创建和运行过程。
 本文内容组织结构：Bultin初始化过程（章节2），Builtin子类型讲解(章节3)。  
 # 2 Builtin初始化  
 下面是`code`类，它负责管理所有`Builtin`功能，是`builtin table`的数据类型。
@@ -126,6 +126,9 @@
 30.        params.only_terminate_in_safe_scope);
 31.  }
 ```
+```ad-note
+在 Isolate 初始化时，Builtin Snapshot 即被初始化。
+```
 上述方面中进入第22行，最终进入下面的Builtin初始化方法。
 ```c++
 1.  void SetupIsolateDelegate::SetupBuiltinsInternal(Isolate* isolate) {
@@ -171,7 +174,7 @@
 41.  //...................删除部分代码，留下最核心功能
 42.  }
 ```
-上述代码只保留了最核心的Builtin初始化功能，初始化工作的主要是生成并编译Builtin代码，并以独立功能的形式挂载到`isolate`上，以`BuildWithCodeStubAssemblerCS()`详细描述该过程。  
+上述代码只保留了最核心的Builtin初始化功能，初始化工作的主要是**生成并编译Builtin代码**，并以独立功能的形式挂载到`isolate`上，以`BuildWithCodeStubAssemblerCS()`详细描述该过程。  
 见下面代码，第一个参数是`isolate`，用于保存初化完成的`Builtin`；第二个参数全局变量`index`，`Builtin`存储在`isolate`的数组成员中，`index`是数组下标；第三个参数`generator`是函数指针，该函数用于生成`Builtin`；第四个参数是call描述符；最后一个是函数名字。  
 ```c++
 1.  // Builder for builtins implemented in TurboFan with CallStub linkage.
@@ -296,7 +299,7 @@ void Builtins::set_builtin(int index, Code builtin) {
   isolate_->heap()->set_builtin(index, builtin);
 }
 ```
-所有`Builtin`功能生成后保存在`Address builtins_[Builtins::builtin_count]`中，初始化方法`SetupBuiltinsInternal`按照`BUILTIN_LIST`的定义顺序依次完成所有Builtin的源码生成、编译和挂载到isolate。  
+所有`Builtin`功能生成后保存在`Address builtins_[Builtins::builtin_count]`中，初始化方法`SetupBuiltinsInternal`按照`BUILTIN_LIST`的定义顺序依次完成所有**Builtin的源码生成、编译和挂载到isolate**。  
 # 2 Builtin子类型
 从`Builtins`的功能看，它包括了：Ignition实现、字节码实现、以及ECMA规范实现等众多V8的核心功能，在`BUILTIN_LIST`定义中有详细注释，请读者自行查阅。前面讲过，从`BUILTIN`的实现角度分为七种类型，见下面代码：  
 ```c++

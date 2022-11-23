@@ -3,13 +3,16 @@
 
 # 1 摘要  
 
-Dispatch（调度）负责字节码的调度，每条字节码执行完后由Dispatch负责调度下一条字节码执行，相当于寄存器EIP++、执行下一条字节码。Dispatch是V8维护的全局指令调度机制，它由调度表（dispatch table）、一个物理寄存器和调度函数`Dispatch()`组成，每条字节码处理程序（Bytecode handler）执行结束后不执行下一条字节码，而是执行函数`Dispatch()`，由它负责调用下一条字节码。本文讲解Dispatch机制的源码、数据结构和`Dispatch()`调度方法。  
+Dispatch（调度）负责字节码的调度，每条字节码执行完后由Dispatch负责调度下一条字节码执行，相当于寄存器EIP++、执行下一条字节码。Dispatch是V8维护的**全局指令调度机制**，它由**调度表（dispatch table）**、一个**物理寄存器和调度函数`Dispatch()`组成**，**每条字节码处理程序（Bytecode handler）执行结束后不执行下一条字节码，而是执行函数`Dispatch()`，由它负责调用下一条字节码**。本文讲解Dispatch机制的源码、数据结构和`Dispatch()`调度方法。  
 
 本文内容组织方式：讲解Dispatch机制具体实现（章节2）；`Dispatch()`调度下一条字节码的源码分析（章节3）。  
 
 # 2 Dispatch机制  
 
-字节码处理程序的地址存储在`Dispatch table`中，使用物理寄存器维护。`Dispatch table`是指针数组，数组元素是`Code`类型指针，指向一个字节码处理程序。  
+字节码处理程序的地址存储在`Dispatch table`中，使用**物理寄存器维护**。`Dispatch table`是**指针数组**，数组元素是`Code`类型指针，指向一个字节码处理程序。  
+```ad-note
+Ignition 解释器将 AST 解释为字节码，字节码的执行依赖 Dispatch 函数的调度。Dispatch 调度机制在物理寄存器中维护一个 Dispatch Table，此 Table 列表中记录每个 Bytecode 执行所需的 Builtin 所对应的 Handler 的地址。Dispach 通过查找 Distach Table 以执行 Bytecode。Builtin 已经是 Native code，Isolate 初始化时同时反序列化 Builtin Snapshot 到内存之中。这里 Bytecode 的解释执行为慢路径。
+```
 
 ```c++
 1.  class Code : public HeapObject {

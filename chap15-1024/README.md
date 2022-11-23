@@ -6,12 +6,12 @@
 接下来的文章将以问题为导向讲解V8源码，例如：以闭包技术、或垃圾加收（GC）为专题讲解V8中的相关源码。V8代码过于庞大，以问题为导向可以使得学习主题更加明确、效果更好。同时，我争取做到每篇文章是一个独立的知识点，方便大家阅读。  
 读者可以把想学的内容在文末评论区留言，我汇总后出专题文章。  
 # 1 摘要  
-Javascript的部分功能，如属性访问，新建对象、正则表达式等，由C++编码、以独立函数的形式存在，JavaScript在运行时以函数调用方式使用这些功能，所以称之为Runtime辅助类。`new ojbect()`、`prototype`等功能均由C++函数实现，由于V8封装了这些函数，所以Javascript开发者看不到使用细节。本文讲解Runtime的使用细节，内容包括以下三方面：  
+**Javascript的部分功能，如属性访问，新建对象、正则表达式等，由C++编码、以独立函数的形式存在，JavaScript在运行时以函数调用方式使用这些功能，所以称之为Runtime辅助类**。`new ojbect()`、`prototype`等功能均由C++函数实现，由于V8封装了这些函数，所以Javascript开发者看不到使用细节。本文讲解Runtime的使用细节，内容包括以下三方面：  
 **（1）** Runtime源码讲解，数据结构和定义方法；  
 **（2）** 调用约定，Bytecode如何调用Runtime功能，即builtin调用Runtime功能的约定；  
 **（3）** 自定义Runtime功能方法，随时随地给V8添加钩子函数。  
 # 2 Runtime源码  
-先说明runtime功能有哪些？叫什么？功能是什么？答案在runtime.h文件中，源码如下：
+先说明**runtime功能**有哪些？叫什么？功能是什么？答案在runtime.h文件中，源码如下：
 ```c++
 1.  #define FOR_EACH_INTRINSIC_GENERATOR(F, I)    \
 2.    I(AsyncFunctionAwaitCaught, 2, 1)           \
@@ -115,7 +115,7 @@ RUNTIME_FUNCTION(Runtime_NewObject) {
 ```
 上述代码中，分隔线以下是创建对象的入口函数，最终会调用`JSObject::New()`，这里完成创建对象。创建对象过程中会涉及到创建Map等知识点，内容较多，后续文章专题讲解，请读者先预习。
 # 3 Runtime调用约定，添加钩子函数  
-看懂了Runtime函数的构建方法，也就明白了V8对runtime的封装方式，更能理解Javascript中很多功能的实现原理。Runtime函数的构建方法总结为以下两点：  
+看懂了Runtime函数的构建方法，也就明白了**V8对runtime的封装方式**，更能理解Javascript中很多功能的实现原理。Runtime函数的构建方法总结为以下两点：  
 **（1）** `Runtime`类中有一个枚举成员，成员是函数名。
 ```c++
 class Runtime : public AllStatic {
@@ -131,7 +131,7 @@ class Runtime : public AllStatic {
 //省略很多.......................
 ```
 配合上面的宏模板，展开后是一个`FunctionId`成员。  
-**（2）** V8在编译阶段生成一个runtime函数指针数组（runtime_table），数组下标是枚举成员，数组成员（指针）指针对应的函数地址，最终runtime_table存储在isolate中。  
+**（2）** V8在编译阶段生成一个**runtime函数指针数组（runtime_table**），数组下标是枚举成员，数组成员（指针）指针对应的函数地址，最终**runtime_table存储在isolate中**。  
 这两点内容需要详细看代码分析，需要慢慢理解。**我们绕过这些讨厌的原理！给出最直接的方法，按此操作就可以添加自定义功能！** 随便找个宏定义的位置，例如下面的代码，最后一行是我添加的自定义功能。  
 ```c++
 #define FOR_EACH_INTRINSIC_TEST(F, I)         \
@@ -160,7 +160,7 @@ class Runtime : public AllStatic {
 5.  return ReadOnlyRoots(isolate).undefined_value();
 6.}
 ```
-行1，2是约定，需要使用`RUNTIME_FUNCTION`宏模板和传入`isolate`，行3是参数个数的检测，`MyRuntime`在前面说明了一个参数，一个返回值，所以行3的检测是`args.length()  ==1`，这行也可以省略；行5是返回值，返回空值。行4是功能区，要实现的功能，看看其它runtime的写法，就知道如何实现自己的功能了。  
+行1，2是约定，需要**使用`RUNTIME_FUNCTION`宏模板和传入`isolate`**，行3是参数个数的检测，`MyRuntime`在前面说明了一个参数，一个返回值，所以行3的检测是`args.length()  ==1`，这行也可以省略；行5是返回值，返回空值。行4是功能区，要实现的功能，看看其它runtime的写法，就知道如何实现自己的功能了。  
 我用runtime函数最多的场景是对Bytecodehandler进行状态分析，因为Bytecodehanlder是Builtins(汇编实现)，所以利用这方式充当断点，观察执行状态。下面说明如何在一个Bytecodehandler中调用`MyRuntime`，调用方法：
 `CallRuntime(Runtime::kMyRuntime, context, your args0);`。下面给出一个事例：
 ```c++
